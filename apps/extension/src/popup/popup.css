@@ -14,6 +14,7 @@ body {
 
 .container {
   padding: 16px;
+  position: relative;
 }
 
 h1 {
@@ -24,6 +25,7 @@ h1 {
   gap: 6px;
 }
 
+/* Page info card */
 .page-info {
   background: #fff;
   border: 1px solid #e0e0e0;
@@ -36,59 +38,180 @@ h1 {
 .page-info .title {
   font-weight: 600;
   margin-bottom: 4px;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .page-info .url {
+  font-size: 11px;
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Selection badge */
+.selection-badge {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.selection-icon {
+  background: #ffc107;
+  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.selection-preview {
+  display: block;
+  width: 100%;
   font-size: 12px;
   color: #666;
+  margin-top: 4px;
+  line-height: 1.4;
 }
 
-label {
-  display: block;
-  font-weight: 500;
-  margin-bottom: 4px;
+/* Section labels */
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  margin-top: 4px;
+}
+
+/* Action grid */
+.action-grid {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+/* Action buttons (override global button) */
+.action-btn {
+  flex: 1;
+  min-width: 90px;
+  padding: 10px 6px;
+  border: none;
+  border-radius: 8px;
   font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  width: auto;
 }
 
-select,
+.action-btn:active {
+  transform: scale(0.97);
+}
+
+.action-btn.primary {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.action-btn.primary:hover {
+  background: #c0392b;
+}
+
+.action-btn.selection-btn {
+  background: #f39c12;
+  color: #fff;
+}
+
+.action-btn.selection-btn:hover {
+  background: #d68910;
+}
+
+.action-btn.secondary {
+  background: #ecf0f1;
+  color: #2c3e50;
+}
+
+.action-btn.secondary:hover {
+  background: #d5dbdb;
+}
+
+.action-btn:disabled {
+  background: #bbb !important;
+  color: #fff;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* More toggle */
+.more-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+  padding: 6px 0;
+  margin-bottom: 8px;
+}
+
+.more-toggle:hover {
+  color: #555;
+  background: none;
+}
+
+/* Note textarea */
 textarea {
   width: 100%;
   padding: 8px;
   border: 1px solid #d0d0d0;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 13px;
   font-family: inherit;
-  margin-bottom: 12px;
-}
-
-textarea {
+  margin-bottom: 8px;
   resize: vertical;
-  min-height: 60px;
+  min-height: 48px;
+  color: #333;
 }
 
-button {
-  width: 100%;
-  padding: 10px;
-  background: #e74c3c;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
+textarea::placeholder {
+  color: #aaa;
+  font-size: 12px;
+}
+
+/* Sending overlay */
+.sending-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
   font-weight: 600;
-  cursor: pointer;
+  color: #e74c3c;
+  border-radius: 6px;
+  z-index: 10;
 }
 
-button:hover {
-  background: #c0392b;
-}
-
-button:disabled {
-  background: #bbb;
-  cursor: not-allowed;
-}
-
+/* Status feedback */
 .status {
-  margin-top: 10px;
+  margin-top: 6px;
   padding: 8px;
   border-radius: 6px;
   font-size: 13px;
@@ -105,13 +228,36 @@ button:disabled {
   color: #721c24;
 }
 
+/* Footer */
+.footer {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.footer a {
+  font-size: 12px;
+  color: #999;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.footer a:hover {
+  color: #666;
+}
+
+/* Not configured */
 .no-config {
   text-align: center;
-  padding: 20px;
+  padding: 24px 16px;
   color: #666;
+}
+
+.no-config p {
+  margin-bottom: 12px;
 }
 
 .no-config a {
   color: #e74c3c;
   cursor: pointer;
+  font-weight: 600;
 }

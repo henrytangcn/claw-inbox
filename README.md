@@ -1,6 +1,6 @@
 # Claw Inbox
 
-浏览器插件 + 云端 Bridge，一键把网页发送给云端 OpenClaw 处理。
+浏览器插件 + 云端 Bridge，一键把网页或选中文本发送给云端 OpenClaw 处理。
 
 ## 架构
 
@@ -13,9 +13,9 @@
                          │ Fire-and-forget 异步转发
 ```
 
-- **Extension**：Chrome 插件（Manifest V3），捕获当前页面信息，选择 Action，发送到 Bridge
+- **Extension**：Chrome 插件（Manifest V3），捕获当前页面信息或选中文本，选择 Action，发送到 Bridge
 - **Bridge**：Fastify 服务器，部署在云端，负责鉴权、校验、格式化消息，通过 CLI 调用 OpenClaw
-- **Shared**：共享类型和常量，被 Bridge 和 Extension 共同使用
+- **Shared**：共享类型、常量和 Action 标签，被 Bridge 和 Extension 共同使用
 
 ## 项目结构
 
@@ -41,23 +41,23 @@ claw-inbox/
 │       ├── public/
 │       │   └── manifest.json
 │       └── src/
-│           ├── popup/       # Popup 主界面
+│           ├── popup/       # Popup 主界面（高频动作优先）
 │           │   ├── App.tsx
 │           │   ├── main.tsx
 │           │   └── popup.css
-│           ├── options/     # 设置页面
+│           ├── options/     # 设置页面（含连接状态指示）
 │           │   ├── OptionsApp.tsx
 │           │   └── options.tsx
-│           ├── background/  # Service Worker（预留）
+│           ├── background/  # Service Worker（右键菜单 + 通知）
 │           │   └── index.ts
 │           └── lib/
-│               ├── api.ts       # Bridge API 调用
-│               ├── browser.ts   # 获取当前页面信息
+│               ├── api.ts       # Bridge API 调用 + 错误分类
+│               ├── browser.ts   # 获取页面信息 + 选中文本
 │               └── settings.ts  # chrome.storage 读写
 ├── packages/
 │   └── shared/              # 共享类型与常量
 │       └── src/
-│           ├── actions.ts   # 5 种 Action 定义
+│           ├── actions.ts   # Action 定义 + 中文标签 + 反馈文案
 │           ├── types.ts     # CapturePayload 等类型
 │           └── index.ts     # 统一导出
 ├── pnpm-workspace.yaml
@@ -65,15 +65,39 @@ claw-inbox/
 └── package.json
 ```
 
+## 核心使用场景
+
+### 场景 1：总结一篇文章
+1. 打开任意网页
+2. 点击 Claw Inbox 插件图标
+3. 点击「总结这页」
+4. 龙虾自动阅读全文，生成摘要，发到 Telegram，存入 Notion
+
+### 场景 2：翻译选中文本
+1. 在网页中选中一段外文
+2. 点击插件图标
+3. 看到「已选中文本」提示
+4. 点击「翻译选中文本」
+5. 龙虾翻译选中内容，结果发到 Telegram
+
+### 场景 3：右键快速发送
+1. 在网页空白处右键 → **Send page to Claw Inbox**（默认稍后处理）
+2. 选中文本后右键 → **Send selection to Claw Inbox**（默认总结）
+3. 无需打开 popup，直接发送，系统通知反馈结果
+
+### 场景 4：稍后处理
+1. 点击插件 →「稍后处理」
+2. 文章信息保存到 Notion，等有空再看
+
 ## 支持的 Action
 
-| Action | 说明 | OpenClaw 行为 |
+| Action | UI 文案 | OpenClaw 行为 |
 |---|---|---|
-| **later** | 稍后阅读 | 保存标题、URL、备注，不立即处理 |
-| **summarize** | 总结 | 访问页面，生成结构化摘要（3-5 条要点 + 关键结论） |
-| **extract** | 提取 | 从页面提取核心数据、人名、日期、列表等结构化信息 |
-| **translate** | 翻译 | 全文翻译（英→中 / 中→英自动判断） |
-| **archive** | 存档 | 抓取全文归档，保留原始格式 |
+| **later** | 稍后处理 | 保存标题、URL、备注，不立即处理 |
+| **summarize** | 总结内容 | 访问页面，生成结构化摘要（3-5 条要点 + 关键结论） |
+| **extract** | 提取正文 | 从页面提取核心数据、人名、日期、列表等结构化信息 |
+| **translate** | 翻译内容 | 全文翻译（英→中 / 中→英自动判断） |
+| **archive** | 收进资料库 | 抓取全文归档，保留原始格式 |
 
 所有 Action 均会：
 - 保留原文 URL 作为来源引用
@@ -198,20 +222,31 @@ pnpm --filter @claw-inbox/bridge build
 pm2 restart claw-bridge
 ```
 
-## 使用方法
+本地更新插件后需重新 `pnpm run build:extension`，然后在 `chrome://extensions/` 点击刷新。
 
-1. 打开任意网页
-2. 点击 Claw Inbox 插件图标
-3. 自动显示当前页面标题和 URL
-4. 选择一个 Action（summarize / translate / extract / later / archive）
-5. 可选填写备注
-6. 点击「发送给龙虾」
-7. 插件即时反馈发送成功
-8. OpenClaw 在后台处理，结果发送到 Telegram/飞书，并上传到 Notion
+## 已实现功能
 
-## 已实现功能 (v0.1)
+### v0.2 (当前)
 
-### Bridge
+**Extension 新增**
+- [x] **选中文本支持**：自动检测页面选中文本，支持发送选中内容
+- [x] **右键菜单**：Send page / Send selection to Claw Inbox
+- [x] **Popup 重新设计**：高频动作（总结/提取/稍后处理）作为主按钮
+- [x] **选中文本区域**：检测到选中文本时展示专用操作按钮（总结/翻译）
+- [x] **更多操作折叠**：低频动作（翻译/存档）折叠在「更多操作」中
+- [x] **中文反馈文案**：发送成功/失败提示更具体（告知用户发给谁、做什么）
+- [x] **错误分类提示**：区分 token 未配置/bridge 不可达/鉴权失败/服务器错误
+- [x] **右键菜单通知**：发送后通过系统通知反馈结果
+- [x] **Options 页面优化**：连接状态指示器 + 工作方式说明 + 保存时自动测试
+- [x] **Note 智能 placeholder**：提供使用示例引导用户
+
+**Shared 新增**
+- [x] ACTION_LABELS：每个 Action 的中文显示名
+- [x] ACTION_FEEDBACK / SELECTION_FEEDBACK：发送成功反馈文案
+
+### v0.1
+
+**Bridge**
 - [x] GET `/health` 健康检查
 - [x] POST `/capture` 接收页面数据
 - [x] Bearer Token 鉴权（401 未授权）
@@ -226,7 +261,7 @@ pm2 restart claw-bridge
 - [x] CORS 支持
 - [x] Rate Limit（60 次/分钟）
 
-### Extension
+**Extension**
 - [x] Manifest V3
 - [x] 自动获取当前页面 title / URL
 - [x] 5 种 Action 选择器
@@ -237,16 +272,16 @@ pm2 restart claw-bridge
 - [x] 测试连接按钮
 - [x] chrome.storage.local 持久化设置
 
-## Roadmap
+## Roadmap (v0.3+)
 
-- [ ] 选中文本（selection）支持
-- [ ] 右键菜单（context menu）
-- [ ] 快捷键支持
+- [ ] 快捷键支持（Ctrl+Shift+S 快速发送）
 - [ ] 截图捕获
-- [ ] 处理历史记录
+- [ ] 处理历史记录（本地查看发送记录）
 - [ ] Notion 数据库结构优化（标签、分类）
 - [ ] Firefox 支持
 - [ ] 自定义 Action 支持
+- [ ] 批量发送（多个标签页）
+- [ ] 侧边栏模式
 
 ## 技术栈
 
