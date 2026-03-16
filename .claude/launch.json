@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Bridge Dev Server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@claw-inbox/bridge", "dev"],
+      "port": 8787
+    },
+    {
+      "name": "Extension Watch Build",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@claw-inbox/extension", "dev"]
+    }
+  ]
+}
