@@ -1,8 +1,8 @@
-export { ACTIONS } from "./actions";
-export type { ClawInboxAction } from "./actions";
+export { ACTIONS } from "./actions.js";
+export type { ClawInboxAction } from "./actions.js";
 export type {
   CaptureType,
   CapturePayload,
   CaptureResponse,
   HealthResponse,
-} from "./types";
+} from "./types.js";

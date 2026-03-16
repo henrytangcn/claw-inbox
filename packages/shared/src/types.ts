@@ -1,4 +1,4 @@
-import type { ClawInboxAction } from "./actions";
+import type { ClawInboxAction } from "./actions.js";
 
 export type CaptureType = "page" | "selection";
 
