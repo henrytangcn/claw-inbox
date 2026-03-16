@@ -1,4 +1,8 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { config } from "../config.js";
+
+const execFileAsync = promisify(execFile);
 
 export async function forwardToOpenClaw(message: string): Promise<void> {
   if (config.forwardMode === "mock") {
@@ -8,26 +12,30 @@ export async function forwardToOpenClaw(message: string): Promise<void> {
     return;
   }
 
-  // Real OpenClaw gateway integration
-  const url = `${config.openclawGatewayUrl}/v1/responses`;
+  // Real OpenClaw integration via CLI
+  const args = [
+    "agent",
+    "--agent", config.openclawAgentId,
+    "--message", message,
+    "--json",
+  ];
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.openclawGatewayToken}`,
-      "x-openclaw-agent-id": config.openclawAgentId,
-    },
-    body: JSON.stringify({
-      model: "openclaw",
-      input: message,
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`OpenClaw gateway error ${res.status}: ${body}`);
+  // Optionally deliver reply to a channel
+  if (config.openclawDeliverChannel) {
+    args.push("--deliver");
+    args.push("--reply-channel", config.openclawDeliverChannel);
+    if (config.openclawDeliverTarget) {
+      args.push("--reply-to", config.openclawDeliverTarget);
+    }
   }
 
-  console.log(`[OpenClaw] Message forwarded to agent "${config.openclawAgentId}"`);
+  try {
+    const { stdout, stderr } = await execFileAsync("openclaw", args, {
+      timeout: 120_000, // 2 minutes
+    });
+    console.log(`[OpenClaw] Agent response:`, stdout);
+    if (stderr) console.warn(`[OpenClaw] stderr:`, stderr);
+  } catch (err: any) {
+    throw new Error(`OpenClaw CLI error: ${err.message}`);
+  }
 }
