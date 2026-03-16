@@ -1,0 +1,14 @@
+{
+  "name": "claw-inbox",
+  "private": true,
+  "scripts": {
+    "dev:bridge": "pnpm --filter @claw-inbox/bridge dev",
+    "build:bridge": "pnpm --filter @claw-inbox/bridge build",
+    "dev:extension": "pnpm --filter @claw-inbox/extension dev",
+    "build:extension": "pnpm --filter @claw-inbox/extension build",
+    "build:shared": "pnpm --filter @claw-inbox/shared build"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}
