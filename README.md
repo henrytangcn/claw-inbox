@@ -11,6 +11,9 @@
                          │ Zod 校验                                          Notion 存档
                          │ 消息格式化
                          │ Fire-and-forget 异步转发
+                         │
+                         │ action=later 时：
+                         └──> 文件系统队列 (/root/.openclaw/workspace/claw-inbox/pending/)
 ```
 
 - **Extension**：Chrome 插件（Manifest V3），捕获当前页面信息或选中文本，选择 Action，发送到 Bridge
@@ -29,9 +32,10 @@ claw-inbox/
 │   │       ├── config.ts    # 环境变量配置
 │   │       ├── routes/
 │   │       │   ├── health.ts    # GET /health
-│   │       │   └── capture.ts   # POST /capture
+│   │       │   └── capture.ts   # POST /capture（区分 later / 其他）
 │   │       ├── services/
-│   │       │   └── openclaw.ts  # OpenClaw 转发（mock / 真实 CLI）
+│   │       │   ├── openclaw.ts  # OpenClaw 转发（mock / 真实 CLI）
+│   │       │   └── inbox.ts     # 待处理队列（文件系统）
 │   │       └── utils/
 │   │           ├── auth.ts          # Bearer Token 验证
 │   │           ├── cors.ts          # CORS 配置
@@ -41,24 +45,25 @@ claw-inbox/
 │       ├── public/
 │       │   └── manifest.json
 │       └── src/
-│           ├── popup/       # Popup 主界面（高频动作优先）
+│           ├── popup/       # Popup 主界面（高频动作 + 历史记录）
 │           │   ├── App.tsx
 │           │   ├── main.tsx
 │           │   └── popup.css
-│           ├── options/     # 设置页面（含连接状态指示）
+│           ├── options/     # 设置页面（含连接状态 + 工作方式说明）
 │           │   ├── OptionsApp.tsx
 │           │   └── options.tsx
-│           ├── background/  # Service Worker（右键菜单 + 通知）
+│           ├── background/  # Service Worker（右键菜单 + 通知 + 历史）
 │           │   └── index.ts
 │           └── lib/
 │               ├── api.ts       # Bridge API 调用 + 错误分类
 │               ├── browser.ts   # 获取页面信息 + 选中文本
+│               ├── history.ts   # 最近 5 条发送历史管理
 │               └── settings.ts  # chrome.storage 读写
 ├── packages/
 │   └── shared/              # 共享类型与常量
 │       └── src/
-│           ├── actions.ts   # Action 定义 + 中文标签 + 反馈文案
-│           ├── types.ts     # CapturePayload 等类型
+│           ├── actions.ts   # Action 定义 + 中文标签 + 反馈 + 目标路径
+│           ├── types.ts     # CapturePayload / CaptureResponse / CaptureHistoryItem
 │           └── index.ts     # 统一导出
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json
@@ -71,7 +76,8 @@ claw-inbox/
 1. 打开任意网页
 2. 点击 Claw Inbox 插件图标
 3. 点击「总结这页」
-4. 龙虾自动阅读全文，生成摘要，发到 Telegram，存入 Notion
+4. 提示「已发送给龙虾：总结内容 / 结果将回到 Telegram」
+5. 龙虾自动阅读全文，生成摘要，发到 Telegram，存入 Notion
 
 ### 场景 2：翻译选中文本
 1. 在网页中选中一段外文
@@ -81,27 +87,72 @@ claw-inbox/
 5. 龙虾翻译选中内容，结果发到 Telegram
 
 ### 场景 3：右键快速发送
-1. 在网页空白处右键 → **Send page to Claw Inbox**（默认稍后处理）
+1. 在网页空白处右键 → **Send page to Claw Inbox**（默认加入待处理）
 2. 选中文本后右键 → **Send selection to Claw Inbox**（默认总结）
 3. 无需打开 popup，直接发送，系统通知反馈结果
 
-### 场景 4：稍后处理
-1. 点击插件 →「稍后处理」
-2. 文章信息保存到 Notion，等有空再看
+### 场景 4：加入待处理
+1. 点击插件 →「加入待处理」
+2. 文章信息写入 Bridge 服务器的待处理队列
+3. 不会立即处理，可后续继续总结 / 翻译 / 提取 / 归档
+4. popup 历史区显示该条为「待处理」状态
+
+### 场景 5：失败重试
+1. 因网络问题发送失败
+2. popup 历史区显示该条为「失败」状态，附带错误原因
+3. 点击「重试」按钮，使用原始参数重新发送
+4. 成功后状态自动更新
 
 ## 支持的 Action
 
 | Action | UI 文案 | OpenClaw 行为 |
 |---|---|---|
-| **later** | 稍后处理 | 保存标题、URL、备注，不立即处理 |
+| **later** | 加入待处理 | 写入文件队列，不立即处理，不写 memory |
 | **summarize** | 总结内容 | 访问页面，生成结构化摘要（3-5 条要点 + 关键结论） |
 | **extract** | 提取正文 | 从页面提取核心数据、人名、日期、列表等结构化信息 |
-| **translate** | 翻译内容 | 全文翻译（英→中 / 中→英自动判断） |
+| **translate** | 翻译内容 | 逐段严格全文翻译（英→中 / 中→英自动判断） |
 | **archive** | 收进资料库 | 抓取全文归档，保留原始格式 |
 
 所有 Action 均会：
 - 保留原文 URL 作为来源引用
-- 处理完成后上传结果到 Notion 个人库
+- 处理完成后上传结果到 Notion 个人库（later 除外）
+
+## 待处理队列（Pending Queue）
+
+「加入待处理」使用文件系统队列，不走 OpenClaw forwarding。
+
+### 存储路径
+
+```
+/root/.openclaw/workspace/claw-inbox/
+├── pending/     # 待处理项
+├── processed/   # 已处理项（未来扩展）
+└── failed/      # 失败项（未来扩展）
+```
+
+### 文件格式
+
+每个待处理项为一个独立 JSON 文件：
+
+```
+2026-03-16T21-03-11-245Z__ci_a1b2c3d4e5f6.json
+```
+
+包含字段：
+- `id`, `status`, `createdAt`, `updatedAt`
+- `type`, `action`, `title`, `url`, `selection`, `note`
+- `source`（来源信息）
+- `routing`（投递渠道配置）
+- `nextActions`（后续可执行的操作列表）
+- `result`, `error`
+
+### 与 archive 的区别
+
+| | 加入待处理 | 收进资料库 |
+|---|---|---|
+| **行为** | 只入队，不处理 | 龙虾立即抓取全文并归档 |
+| **存储** | Bridge 本地文件队列 | Notion 个人库 |
+| **后续** | 可手动继续处理 | 处理完成 |
 
 ## 本地开发
 
@@ -185,6 +236,9 @@ ALLOWED_ORIGINS=*
 OPENCLAW_AGENT_ID=main
 OPENCLAW_DELIVER_CHANNEL=telegram
 OPENCLAW_DELIVER_TARGET=<你的 Telegram chat ID>
+
+# 待处理队列路径
+INBOX_BASE_PATH=/root/.openclaw/workspace/claw-inbox
 ```
 
 ### 使用 pm2 守护进程
@@ -226,69 +280,74 @@ pm2 restart claw-bridge
 
 ## 已实现功能
 
-### v0.2 (当前)
+### v0.3 (当前)
+
+**核心改进**
+- [x] **最近 5 条发送历史**：popup 底部展示发送记录（状态 + 动作 + 标题 + 时间 + 目标路径）
+- [x] **失败重试**：失败记录提供「重试」按钮，使用原始 payload 重新发送
+- [x] **明确结果路径**：每次发送后告知「发给谁了」和「结果去哪里」（如"结果将回到 Telegram"）
+- [x] **"later" → "加入待处理"**：UI 全面替换为中文产品语义
+- [x] **待处理文件队列**：`action=later` 写入 `/root/.openclaw/workspace/claw-inbox/pending/`，不走 OpenClaw
+- [x] **富响应结构**：Bridge 返回 mode / targetLabel / deliveryHint / code，前端精确展示
+- [x] **错误码体系**：UNAUTHORIZED / INBOX_WRITE_FAILED / VALIDATION_ERROR / SERVER_ERROR
+
+**Bridge 新增**
+- [x] `services/inbox.ts`：文件系统队列，自动创建目录，生成唯一 ID，写入 JSON
+- [x] `/capture` 路由区分 later（入队）和其他 action（转发）
+- [x] 配置项 `INBOX_BASE_PATH`
+
+**Extension 新增**
+- [x] `lib/history.ts`：chrome.storage.local 管理最近 5 条记录
+- [x] Popup 历史列表：状态标记（✓ / ◷ / ✗）+ 相对时间 + 目标路径
+- [x] 发送成功后展示 deliveryHint（如"结果将回到 Telegram"）
+- [x] 右键菜单发送也写入历史
+- [x] Options 页面增加"加入待处理"的工作方式说明
+
+### v0.2
 
 **Extension 新增**
 - [x] **选中文本支持**：自动检测页面选中文本，支持发送选中内容
 - [x] **右键菜单**：Send page / Send selection to Claw Inbox
-- [x] **Popup 重新设计**：高频动作（总结/提取/稍后处理）作为主按钮
+- [x] **Popup 重新设计**：高频动作（总结/提取/加入待处理）作为主按钮
 - [x] **选中文本区域**：检测到选中文本时展示专用操作按钮（总结/翻译）
 - [x] **更多操作折叠**：低频动作（翻译/存档）折叠在「更多操作」中
-- [x] **中文反馈文案**：发送成功/失败提示更具体（告知用户发给谁、做什么）
+- [x] **中文反馈文案**：发送成功/失败提示更具体
 - [x] **错误分类提示**：区分 token 未配置/bridge 不可达/鉴权失败/服务器错误
-- [x] **右键菜单通知**：发送后通过系统通知反馈结果
-- [x] **Options 页面优化**：连接状态指示器 + 工作方式说明 + 保存时自动测试
-- [x] **Note 智能 placeholder**：提供使用示例引导用户
-
-**Shared 新增**
-- [x] ACTION_LABELS：每个 Action 的中文显示名
-- [x] ACTION_FEEDBACK / SELECTION_FEEDBACK：发送成功反馈文案
+- [x] **Options 页面优化**：连接状态指示器 + 工作方式说明
 
 ### v0.1
 
 **Bridge**
 - [x] GET `/health` 健康检查
 - [x] POST `/capture` 接收页面数据
-- [x] Bearer Token 鉴权（401 未授权）
-- [x] Zod payload 校验（400 格式错误）
+- [x] Bearer Token 鉴权 + Zod 校验
 - [x] 每个 Action 独立中文指令描述
-- [x] 所有 Action 要求保留原文 URL
-- [x] 所有 Action 附带 Notion 上传指令
-- [x] Mock 模式（console.log）
-- [x] 真实模式（OpenClaw CLI 调用）
-- [x] Fire-and-forget 异步转发（不阻塞响应）
-- [x] 可配置回复渠道和目标
-- [x] CORS 支持
-- [x] Rate Limit（60 次/分钟）
+- [x] Mock 模式 / 真实 CLI 模式
+- [x] Fire-and-forget 异步转发
+- [x] CORS + Rate Limit
 
 **Extension**
-- [x] Manifest V3
+- [x] Manifest V3 + React + Vite
 - [x] 自动获取当前页面 title / URL
-- [x] 5 种 Action 选择器
-- [x] Note 输入框
-- [x] 发送成功/失败反馈
-- [x] 未配置时引导跳转 Options
-- [x] Options 页面：Bridge URL + API Token 设置
-- [x] 测试连接按钮
-- [x] chrome.storage.local 持久化设置
+- [x] Options 页面：Bridge URL + API Token + 测试连接
 
-## Roadmap (v0.3+)
+## Roadmap (v0.4+)
 
 - [ ] 快捷键支持（Ctrl+Shift+S 快速发送）
-- [ ] 截图捕获
-- [ ] 处理历史记录（本地查看发送记录）
-- [ ] Notion 数据库结构优化（标签、分类）
-- [ ] Firefox 支持
-- [ ] 自定义 Action 支持
+- [ ] 自定义默认 Action（右键菜单/快捷键的默认动作）
+- [ ] Notion 数据库 ID 可配置
 - [ ] 批量发送（多个标签页）
 - [ ] 侧边栏模式
+- [ ] 截图捕获
+- [ ] Firefox 支持
+- [ ] 待处理项后续处理（从 pending 触发 summarize/translate 等）
 
 ## 技术栈
 
 | 组件 | 技术 |
 |---|---|
-| Shared | TypeScript, Zod |
-| Bridge | Fastify, @fastify/cors, @fastify/rate-limit, dotenv, tsx |
+| Shared | TypeScript |
+| Bridge | Fastify, @fastify/cors, @fastify/rate-limit, dotenv, Zod |
 | Extension | React 19, Vite, TypeScript, Chrome Manifest V3 |
 | 进程管理 | pm2 |
 | 包管理 | pnpm workspace monorepo |

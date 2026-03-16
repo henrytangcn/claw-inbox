@@ -1,17 +1,29 @@
 import { useState, useEffect } from "react";
 import {
   ACTION_LABELS,
-  ACTION_FEEDBACK,
-  SELECTION_FEEDBACK,
   type ClawInboxAction,
   type CaptureType,
+  type CapturePayload,
+  type CaptureHistoryItem,
+  type CaptureResponse,
 } from "@claw-inbox/shared";
 import { getCurrentPageInfo, type PageInfo } from "../lib/browser";
-import { sendCapture, getErrorMessage } from "../lib/api";
+import { sendCapture, getErrorMessage, isRetryableError } from "../lib/api";
 import { getSettings } from "../lib/settings";
+import { getHistory, addHistoryItem, updateHistoryItem } from "../lib/history";
 import "./popup.css";
 
-type Status = { type: "success" | "error"; message: string } | null;
+type Status = { type: "success" | "error"; message: string; hint?: string } | null;
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "刚刚";
+  if (mins < 60) return `${mins} 分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return `${Math.floor(hours / 24)} 天前`;
+}
 
 export default function App() {
   const [pageInfo, setPageInfo] = useState<PageInfo>({ title: "", url: "" });
@@ -20,46 +32,87 @@ export default function App() {
   const [status, setStatus] = useState<Status>(null);
   const [configured, setConfigured] = useState(true);
   const [showMore, setShowMore] = useState(false);
+  const [history, setHistory] = useState<CaptureHistoryItem[]>([]);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   useEffect(() => {
     getCurrentPageInfo().then(setPageInfo);
     getSettings().then((s) => {
       if (!s.apiToken) setConfigured(false);
     });
+    getHistory().then(setHistory);
   }, []);
 
   const hasSelection = !!pageInfo.selection;
 
+  const buildPayload = (action: ClawInboxAction, type: CaptureType): CapturePayload => ({
+    type,
+    title: pageInfo.title,
+    url: pageInfo.url,
+    action,
+    selection: type === "selection" ? pageInfo.selection : undefined,
+    note: note || undefined,
+    source: {
+      browser: "chrome",
+      capturedAt: new Date().toISOString(),
+      via: "extension-popup",
+    },
+  });
+
   const doSend = async (action: ClawInboxAction, type: CaptureType) => {
     setSending(true);
     setStatus(null);
-    try {
-      await sendCapture({
-        type,
-        title: pageInfo.title,
-        url: pageInfo.url,
-        action,
-        selection: type === "selection" ? pageInfo.selection : undefined,
-        note: note || undefined,
-        source: {
-          browser: "chrome",
-          capturedAt: new Date().toISOString(),
-        },
-      });
 
-      // Build feedback message
-      let feedback: string;
-      if (type === "selection" && SELECTION_FEEDBACK[action]) {
-        feedback = SELECTION_FEEDBACK[action];
-      } else {
-        feedback = ACTION_FEEDBACK[action];
-      }
-      setStatus({ type: "success", message: feedback });
+    const payload = buildPayload(action, type);
+    let response: CaptureResponse | null = null;
+    let errorMsg: string | null = null;
+
+    try {
+      response = await sendCapture(payload);
+      setStatus({
+        type: "success",
+        message: response.message,
+        hint: response.deliveryHint,
+      });
     } catch (err) {
-      setStatus({ type: "error", message: getErrorMessage(err) });
-    } finally {
-      setSending(false);
+      errorMsg = getErrorMessage(err);
+      setStatus({ type: "error", message: errorMsg });
     }
+
+    await addHistoryItem(payload, response, errorMsg);
+    setHistory(await getHistory());
+    setSending(false);
+  };
+
+  const doRetry = async (item: CaptureHistoryItem) => {
+    setRetryingId(item.id);
+    let response: CaptureResponse | null = null;
+    let errorMsg: string | null = null;
+
+    try {
+      response = await sendCapture(item.payload);
+      const isPending = response.mode === "pending";
+      await updateHistoryItem(item.id, {
+        status: isPending ? "pending" : "success",
+        targetLabel: response.targetLabel ?? item.targetLabel,
+        retryable: false,
+        errorMessage: undefined,
+      });
+      setStatus({
+        type: "success",
+        message: response.message,
+        hint: response.deliveryHint,
+      });
+    } catch (err) {
+      errorMsg = getErrorMessage(err);
+      await updateHistoryItem(item.id, {
+        errorMessage: errorMsg,
+      });
+      setStatus({ type: "error", message: `重试失败: ${errorMsg}` });
+    }
+
+    setHistory(await getHistory());
+    setRetryingId(null);
   };
 
   if (!configured) {
@@ -118,7 +171,7 @@ export default function App() {
           onClick={() => doSend("later", "page")}
           disabled={sending}
         >
-          稍后处理
+          加入待处理
         </button>
       </div>
 
@@ -184,7 +237,47 @@ export default function App() {
 
       {/* Status feedback */}
       {status && (
-        <div className={`status ${status.type}`}>{status.message}</div>
+        <div className={`status ${status.type}`}>
+          <div>{status.message}</div>
+          {status.hint && <div className="status-hint">{status.hint}</div>}
+        </div>
+      )}
+
+      {/* History */}
+      {history.length > 0 && (
+        <>
+          <div className="section-label history-label">最近发送</div>
+          <div className="history-list">
+            {history.map((item) => (
+              <div key={item.id} className={`history-item history-${item.status}`}>
+                <div className="history-top">
+                  <span className={`history-badge badge-${item.status}`}>
+                    {item.status === "success" ? "✓" : item.status === "pending" ? "◷" : "✗"}
+                  </span>
+                  <span className="history-action">{ACTION_LABELS[item.action]}</span>
+                  <span className="history-type">{item.type === "selection" ? "选中" : "页面"}</span>
+                  <span className="history-time">{timeAgo(item.createdAt)}</span>
+                </div>
+                <div className="history-title">{item.title}</div>
+                <div className="history-target">{item.targetLabel}</div>
+                {item.status === "failed" && (
+                  <div className="history-error">
+                    <span>{item.errorMessage}</span>
+                    {item.retryable && (
+                      <button
+                        className="retry-btn"
+                        onClick={() => doRetry(item)}
+                        disabled={retryingId === item.id}
+                      >
+                        {retryingId === item.id ? "重试中..." : "重试"}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Settings link */}

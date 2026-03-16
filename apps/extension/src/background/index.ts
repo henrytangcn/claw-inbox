@@ -1,6 +1,6 @@
-import type { CapturePayload } from "@claw-inbox/shared";
+import type { CapturePayload, CaptureResponse, CaptureHistoryItem } from "@claw-inbox/shared";
 
-// ── Settings helper (can't import from lib due to service worker scope) ──
+// ── Settings helper (inlined for service worker) ──
 
 interface Settings {
   bridgeBaseUrl: string;
@@ -15,9 +15,51 @@ async function getSettings(): Promise<Settings> {
   };
 }
 
+// ── History helper (inlined for service worker) ──
+
+const STORAGE_KEY = "captureHistory";
+const MAX_ITEMS = 5;
+
+async function addHistoryFromBg(
+  payload: CapturePayload,
+  response: CaptureResponse | null,
+  error: string | null,
+): Promise<void> {
+  const result = await chrome.storage.local.get(STORAGE_KEY);
+  const items: CaptureHistoryItem[] = result[STORAGE_KEY] || [];
+
+  const isSuccess = response?.ok === true;
+  const isPending = response?.mode === "pending";
+
+  const targetLabels: Record<string, string> = {
+    later: "待处理队列",
+    summarize: "龙虾 → Telegram",
+    extract: "龙虾 → Telegram",
+    translate: "龙虾 → Telegram",
+    archive: "龙虾 → Telegram",
+  };
+
+  const item: CaptureHistoryItem = {
+    id: "h_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    createdAt: new Date().toISOString(),
+    type: payload.type,
+    action: payload.action,
+    title: payload.title,
+    url: payload.url,
+    status: isSuccess ? (isPending ? "pending" : "success") : "failed",
+    targetLabel: response?.targetLabel ?? targetLabels[payload.action] ?? "",
+    retryable: !isSuccess,
+    payload,
+    errorMessage: error ?? undefined,
+  };
+
+  items.unshift(item);
+  await chrome.storage.local.set({ [STORAGE_KEY]: items.slice(0, MAX_ITEMS) });
+}
+
 // ── Send capture to bridge ──
 
-async function sendCaptureToBridge(payload: CapturePayload): Promise<void> {
+async function sendCaptureToBridge(payload: CapturePayload): Promise<CaptureResponse> {
   const { bridgeBaseUrl, apiToken } = await getSettings();
   if (!apiToken) throw new Error("Token not configured");
 
@@ -32,8 +74,11 @@ async function sendCaptureToBridge(payload: CapturePayload): Promise<void> {
   });
 
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || `HTTP ${res.status}`);
   }
+
+  return res.json() as Promise<CaptureResponse>;
 }
 
 // ── Notification helper ──
@@ -52,7 +97,6 @@ function notify(message: string, isError = false) {
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Claw Inbox extension installed");
 
-  // Create context menus
   chrome.contextMenus.create({
     id: "claw-send-page",
     title: "Send page to Claw Inbox",
@@ -83,17 +127,20 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     source: {
       browser: "chrome",
       capturedAt: new Date().toISOString(),
+      via: "context-menu",
     },
   };
 
+  let response: CaptureResponse | null = null;
+  let errorMsg: string | null = null;
+
   try {
-    await sendCaptureToBridge(payload);
-    const msg = isSelection
-      ? "已发送选中文本给龙虾进行总结"
-      : "已加入稍后处理列表";
-    notify(msg);
+    response = await sendCaptureToBridge(payload);
+    notify(response.message);
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : "Unknown error";
-    notify(`发送失败: ${errMsg}`, true);
+    errorMsg = err instanceof Error ? err.message : "Unknown error";
+    notify(`发送失败: ${errorMsg}`, true);
   }
+
+  await addHistoryFromBg(payload, response, errorMsg);
 });

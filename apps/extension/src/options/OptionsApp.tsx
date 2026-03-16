@@ -172,8 +172,12 @@ export default function OptionsApp() {
         color: "#666",
         lineHeight: 1.6,
       }}>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>工作方式</div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>工作方式</div>
         <div>插件捕获网页信息 → 发送到 Bridge → Bridge 转发给龙虾 (OpenClaw) → 处理结果发送到 Telegram/飞书，并保存到 Notion</div>
+        <div style={{ marginTop: 8, borderTop: "1px solid #e8e8e8", paddingTop: 8 }}>
+          <div><b>总结 / 提取 / 翻译 / 归档</b>：龙虾处理后，结果默认回到 Telegram</div>
+          <div><b>加入待处理</b>：写入 Bridge 服务器的待处理队列，不会立即处理，可后续继续操作</div>
+        </div>
       </div>
     </div>
   );

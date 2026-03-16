@@ -11,4 +11,7 @@ export const config = {
   openclawAgentId: process.env.OPENCLAW_AGENT_ID ?? "main",
   openclawDeliverChannel: process.env.OPENCLAW_DELIVER_CHANNEL ?? "",
   openclawDeliverTarget: process.env.OPENCLAW_DELIVER_TARGET ?? "",
+
+  // Inbox queue path
+  inboxBasePath: process.env.INBOX_BASE_PATH ?? "/root/.openclaw/workspace/claw-inbox",
 };

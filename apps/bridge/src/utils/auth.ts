@@ -7,10 +7,10 @@ export async function verifyToken(
 ) {
   const header = request.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) {
-    return reply.status(401).send({ ok: false, message: "Missing token" });
+    return reply.status(401).send({ ok: false, code: "UNAUTHORIZED", message: "API Token 缺失" });
   }
   const token = header.slice(7);
   if (token !== config.apiToken) {
-    return reply.status(401).send({ ok: false, message: "Invalid token" });
+    return reply.status(401).send({ ok: false, code: "UNAUTHORIZED", message: "API Token 无效" });
   }
 }
