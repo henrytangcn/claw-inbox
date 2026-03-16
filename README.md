@@ -1,5 +1,7 @@
 # Claw Inbox
 
+[English](./README.en.md) | 中文
+
 浏览器插件 + 云端 Bridge，一键把网页或选中文本发送给云端 OpenClaw 处理。
 
 ## 架构
