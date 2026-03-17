@@ -141,8 +141,8 @@ All actions will:
 ```
 /root/.openclaw/workspace/claw-inbox/
 ├── pending/     # Pending items
-├── processed/   # Processed items (future)
-└── failed/      # Failed items (future)
+├── processed/   # Processed items (moved here on success)
+└── failed/      # Failed items (moved here on failure)
 ```
 
 ### File Format
@@ -160,6 +160,36 @@ Fields include:
 - `routing` (delivery channel config)
 - `nextActions` (list of actions that can be applied later)
 - `result`, `error`
+
+### Pending Workflow
+
+Full lifecycle of a pending item:
+
+1. **Enqueue**: User clicks "Add to Pending" on a page or selection — Bridge writes a JSON file to `pending/`
+2. **View queue**: User opens the pending queue section in the popup, which calls `GET /pending` to list all items
+3. **Pick action**: User selects an item and clicks the desired action button (Summarize / Translate / Extract / Archive)
+4. **Processing**: `POST /pending/:id/process` transitions the status from `pending` to `processing` and forwards to OpenClaw
+5. **Done / Failed**:
+   - Success: status becomes `done`, file moves from `pending/` to `processed/`
+   - Failure: status becomes `failed`, file moves from `pending/` to `failed/`
+6. **History**: Completed processing is automatically written to capture history for popup display
+
+```
+User Action                  Bridge                              Filesystem
+  │                           │                                    │
+  ├─ Add to Pending ─────────> │ Write JSON ───────────────────────> pending/xxx.json
+  │                           │                                    │
+  ├─ Open popup ─────────────> │ GET /pending ─────────────────────> Read pending/*.json
+  │                           │ <── Return list ──                  │
+  │                           │                                    │
+  ├─ Click "Summarize" ──────> │ POST /pending/:id/process          │
+  │                           │   status: pending → processing     │
+  │                           │   Forward to OpenClaw ──>           │
+  │                           │                                    │
+  │                           │ Processing complete:                │
+  │                           │   status → done ───────────────────> Move to processed/
+  │                           │   or status → failed ──────────────> Move to failed/
+```
 
 ### Pending vs. Archive
 
@@ -295,7 +325,27 @@ After updating the extension locally, run `pnpm run build:extension` and click r
 
 ## Implemented Features
 
-### v0.3 (Current)
+### v0.4 (Current)
+
+**Core Improvements**
+- [x] **Pending queue API**: `GET /pending` lists all pending items, `POST /pending/:id/process` triggers processing
+- [x] **Popup pending queue section**: displays pending list with action buttons per item (Summarize / Translate / Extract / Archive)
+- [x] **Status flow**: `pending` → `processing` → `done` / `failed`
+- [x] **File movement**: success moves to `processed/`, failure moves to `failed/`
+- [x] **Pending processing writes to history**: results from pending queue processing auto-write to capture history
+- [x] **New error codes**: PENDING_NOT_FOUND / INVALID_PENDING_STATE / FORWARD_FAILED, etc.
+
+**Bridge**
+- [x] `routes/pending.ts`: pending queue query and processing routes
+- [x] `services/inbox.ts` extended: supports reading, status updates, and file movement
+- [x] Processing results written to capture history
+
+**Extension**
+- [x] `lib/pending.ts`: pending queue API call wrapper
+- [x] Popup adds pending queue UI section
+- [x] Action buttons trigger `POST /pending/:id/process`
+
+### v0.3
 
 **Core Improvements**
 - [x] **Last 5 send history**: shown in popup with status + action + title + time + target path
@@ -346,7 +396,7 @@ After updating the extension locally, run `pnpm run build:extension` and click r
 - [x] Auto-fetches current page title / URL
 - [x] Options page: Bridge URL + API Token + Test Connection
 
-## Roadmap (v0.4+)
+## Roadmap (v0.5+)
 
 - [ ] Keyboard shortcuts (Ctrl+Shift+S for quick send)
 - [ ] Custom default action (for context menu / shortcuts)
@@ -355,7 +405,6 @@ After updating the extension locally, run `pnpm run build:extension` and click r
 - [ ] Side panel mode
 - [ ] Screenshot capture
 - [ ] Firefox support
-- [ ] Process pending items (trigger summarize/translate from pending queue)
 
 ## Tech Stack
 
