@@ -1,4 +1,11 @@
-import type { CapturePayload, CaptureResponse, HealthResponse } from "@claw-inbox/shared";
+import type {
+  CapturePayload,
+  CaptureResponse,
+  HealthResponse,
+  PendingListResponse,
+  PendingProcessAction,
+  PendingProcessResponse,
+} from "@claw-inbox/shared";
 import { getSettings } from "./settings";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -29,7 +36,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    // Try to extract server error code
     try {
       const body = await res.json();
       if (body.code) throw new Error(body.code);
@@ -54,6 +60,20 @@ export async function sendCapture(payload: CapturePayload): Promise<CaptureRespo
   });
 }
 
+export async function fetchPendingList(): Promise<PendingListResponse> {
+  return request<PendingListResponse>("/pending");
+}
+
+export async function processPendingItem(
+  id: string,
+  action: PendingProcessAction,
+): Promise<PendingProcessResponse> {
+  return request<PendingProcessResponse>(`/pending/${id}/process`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
 /** Map error codes to user-friendly Chinese messages */
 export function getErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : "UNKNOWN";
@@ -65,7 +85,14 @@ export function getErrorMessage(err: unknown): string {
     case "AUTH_FAILED":
       return "鉴权失败，请检查 API Token 是否正确";
     case "INBOX_WRITE_FAILED":
+    case "PENDING_WRITE_FAILED":
       return "待处理写入失败，请检查服务器磁盘";
+    case "PENDING_NOT_FOUND":
+      return "待处理项不存在，可能已被处理";
+    case "INVALID_PENDING_STATE":
+      return "该项状态不允许继续处理";
+    case "FORWARD_FAILED":
+      return "转发给龙虾失败，请稍后重试";
     case "VALIDATION_ERROR":
       return "数据校验失败，请刷新页面重试";
     case "SERVER_ERROR":

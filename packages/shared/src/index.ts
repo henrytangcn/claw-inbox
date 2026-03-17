@@ -13,4 +13,10 @@ export type {
   CaptureResponse,
   HealthResponse,
   CaptureHistoryItem,
+  InboxStatus,
+  InboxItem,
+  PendingListResponse,
+  PendingProcessAction,
+  PendingProcessRequest,
+  PendingProcessResponse,
 } from "./types.js";

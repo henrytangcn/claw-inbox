@@ -16,6 +16,9 @@ Browser Extension  ──HTTPS──>  Cloud Bridge (Fastify)  ──CLI──> 
                                 │
                                 │ When action=later:
                                 └──> Filesystem queue (/root/.openclaw/workspace/claw-inbox/pending/)
+                                │
+                                │ GET /pending + POST /pending/:id/process
+                                └──> Query pending queue / trigger processing
 ```
 
 - **Extension**: Chrome extension (Manifest V3) — captures current page info or selected text, picks an action, sends to Bridge
@@ -34,10 +37,11 @@ claw-inbox/
 │   │       ├── config.ts    # Environment config
 │   │       ├── routes/
 │   │       │   ├── health.ts    # GET /health
-│   │       │   └── capture.ts   # POST /capture (later → queue, others → forward)
+│   │       │   ├── capture.ts   # POST /capture (later → queue, others → forward)
+│   │       │   └── pending.ts   # GET /pending + POST /pending/:id/process
 │   │       ├── services/
 │   │       │   ├── openclaw.ts  # OpenClaw forwarding (mock / real CLI)
-│   │       │   └── inbox.ts     # Pending queue (filesystem)
+│   │       │   └── inbox.ts     # Pending queue (filesystem read/write + status transitions)
 │   │       └── utils/
 │   │           ├── auth.ts          # Bearer Token verification
 │   │           ├── cors.ts          # CORS config
@@ -59,7 +63,8 @@ claw-inbox/
 │           └── lib/
 │               ├── api.ts       # Bridge API calls + error classification
 │               ├── browser.ts   # Page info + text selection detection
-│               ├── history.ts   # Last 5 send history management
+│               ├── history.ts   # Send history + pending record management
+│               ├── pending.ts   # Pending queue API calls
 │               └── settings.ts  # chrome.storage read/write
 ├── packages/
 │   └── shared/              # Shared types and constants
@@ -104,6 +109,14 @@ claw-inbox/
 2. The popup history shows it as "Failed" with the error reason
 3. Click the **"Retry"** button to resend with the original parameters
 4. Status updates automatically on success
+
+### Scenario 6: Process from Pending Queue
+1. Click the extension icon to open the popup
+2. View previously added articles in the pending queue section
+3. Pick an article and click **"Summarize"** / **"Translate"** / **"Extract"** / **"Archive"**
+4. Bridge updates the item status to processing and forwards to OpenClaw
+5. On success the file moves to `processed/`; on failure it moves to `failed/`
+6. The popup auto-refreshes to show the latest status
 
 ## Supported Actions
 

@@ -1,4 +1,4 @@
-import type { CapturePayload } from "@claw-inbox/shared";
+import type { CapturePayload, InboxItem, PendingProcessAction } from "@claw-inbox/shared";
 import type { ClawInboxAction } from "@claw-inbox/shared";
 
 const ACTION_INSTRUCTIONS: Record<ClawInboxAction, string> = {
@@ -39,6 +39,37 @@ export function formatMessage(payload: CapturePayload): string {
 
   if (payload.note) {
     lines.push("", `**用户备注:**`, payload.note);
+  }
+
+  lines.push("", `---`, "", NOTION_INSTRUCTION);
+
+  return lines.join("\n");
+}
+
+/** Format message from a pending item being processed */
+export function formatPendingMessage(item: InboxItem, action: PendingProcessAction): string {
+  const instruction = ACTION_INSTRUCTIONS[action];
+
+  const lines = [
+    "[Claw Inbox - 待处理项]",
+    "",
+    `## 任务: ${action}`,
+    "",
+    `**指令:** ${instruction}`,
+    "",
+    `**页面信息:**`,
+    `- 标题: ${item.title}`,
+    `- URL: ${item.url}`,
+    `- 类型: ${item.type}`,
+    `- 来源: 待处理队列 (${item.id})`,
+  ];
+
+  if (item.selection) {
+    lines.push("", `**选中内容:**`, item.selection);
+  }
+
+  if (item.note) {
+    lines.push("", `**用户备注:**`, item.note);
   }
 
   lines.push("", `---`, "", NOTION_INSTRUCTION);

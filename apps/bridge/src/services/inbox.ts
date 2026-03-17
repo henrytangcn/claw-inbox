@@ -1,37 +1,12 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, readdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import type { CapturePayload } from "@claw-inbox/shared";
+import type { CapturePayload, InboxItem, PendingProcessAction } from "@claw-inbox/shared";
 import { config } from "../config.js";
 
 const PENDING_DIR = join(config.inboxBasePath, "pending");
 const PROCESSED_DIR = join(config.inboxBasePath, "processed");
 const FAILED_DIR = join(config.inboxBasePath, "failed");
-
-export interface InboxItem {
-  id: string;
-  status: "pending" | "processing" | "done" | "failed";
-  createdAt: string;
-  updatedAt: string;
-  type: string;
-  action: string;
-  title: string;
-  url: string;
-  selection: string | null;
-  note: string | null;
-  source: {
-    browser?: string;
-    capturedAt?: string;
-    via?: string;
-  };
-  routing: {
-    deliverChannel: string;
-    deliverTarget: string;
-  };
-  nextActions: string[];
-  result: unknown;
-  error: unknown;
-}
 
 /** Ensure all queue directories exist */
 async function ensureDirs(): Promise<void> {
@@ -47,6 +22,8 @@ function generateId(): string {
 function safeTimestamp(date: Date): string {
   return date.toISOString().replace(/[:.]/g, "-");
 }
+
+// ── Create ──
 
 export async function createPendingItem(payload: CapturePayload): Promise<InboxItem> {
   await ensureDirs();
@@ -84,6 +61,119 @@ export async function createPendingItem(payload: CapturePayload): Promise<InboxI
 
   await writeFile(filepath, JSON.stringify(item, null, 2), "utf-8");
   console.log(`[Inbox] Created pending item: ${filepath}`);
+
+  return item;
+}
+
+// ── List ──
+
+export async function listPendingItems(limit = 20): Promise<InboxItem[]> {
+  await ensureDirs();
+
+  let files: string[];
+  try {
+    files = await readdir(PENDING_DIR);
+  } catch {
+    return [];
+  }
+
+  // Only JSON files, sorted descending by name (timestamp-based)
+  const jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse().slice(0, limit);
+
+  const items: InboxItem[] = [];
+  for (const file of jsonFiles) {
+    try {
+      const content = await readFile(join(PENDING_DIR, file), "utf-8");
+      const item = JSON.parse(content) as InboxItem;
+      items.push(item);
+    } catch (err) {
+      console.warn(`[Inbox] Failed to read ${file}:`, err);
+    }
+  }
+
+  return items;
+}
+
+// ── Get by ID ──
+
+async function findFileById(dir: string, id: string): Promise<string | null> {
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return null;
+  }
+  return files.find((f) => f.includes(id) && f.endsWith(".json")) ?? null;
+}
+
+export async function getPendingItem(id: string): Promise<{ item: InboxItem; filepath: string } | null> {
+  await ensureDirs();
+
+  const filename = await findFileById(PENDING_DIR, id);
+  if (!filename) return null;
+
+  const filepath = join(PENDING_DIR, filename);
+  const content = await readFile(filepath, "utf-8");
+  return { item: JSON.parse(content) as InboxItem, filepath };
+}
+
+// ── Update status ──
+
+async function updateItemFile(filepath: string, updates: Partial<InboxItem>): Promise<InboxItem> {
+  const content = await readFile(filepath, "utf-8");
+  const item = JSON.parse(content) as InboxItem;
+  Object.assign(item, updates, { updatedAt: new Date().toISOString() });
+  await writeFile(filepath, JSON.stringify(item, null, 2), "utf-8");
+  return item;
+}
+
+export async function markProcessing(id: string): Promise<InboxItem> {
+  const found = await getPendingItem(id);
+  if (!found) throw new Error("PENDING_NOT_FOUND");
+  if (found.item.status !== "pending") throw new Error("INVALID_PENDING_STATE");
+  return updateItemFile(found.filepath, { status: "processing" });
+}
+
+export async function markDone(id: string, processedAction: PendingProcessAction): Promise<InboxItem> {
+  const found = await getPendingItem(id);
+  if (!found) throw new Error("PENDING_NOT_FOUND");
+
+  const item = await updateItemFile(found.filepath, {
+    status: "done",
+    result: { processedAction, processedAt: new Date().toISOString() },
+  });
+
+  // Move to processed/
+  const filename = found.filepath.split("/").pop()!;
+  const destPath = join(PROCESSED_DIR, filename);
+  try {
+    await rename(found.filepath, destPath);
+    console.log(`[Inbox] Moved to processed: ${destPath}`);
+  } catch (err) {
+    console.warn(`[Inbox] Move to processed failed, keeping in pending:`, err);
+  }
+
+  return item;
+}
+
+export async function markFailed(id: string, error: string): Promise<InboxItem> {
+  const found = await getPendingItem(id);
+  if (!found) throw new Error("PENDING_NOT_FOUND");
+
+  const item = await updateItemFile(found.filepath, {
+    status: "failed",
+    error,
+  });
+
+  // Move to failed/
+  const filename = found.filepath.split("/").pop()!;
+  const destPath = join(FAILED_DIR, filename);
+  try {
+    await rename(found.filepath, destPath);
+    console.log(`[Inbox] Moved to failed: ${destPath}`);
+  } catch (err) {
+    console.warn(`[Inbox] Move to failed failed, keeping in pending:`, err);
+  }
 
   return item;
 }

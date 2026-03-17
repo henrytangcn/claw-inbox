@@ -16,6 +16,9 @@
                          │
                          │ action=later 时：
                          └──> 文件系统队列 (/root/.openclaw/workspace/claw-inbox/pending/)
+                         │
+                         │ GET /pending + POST /pending/:id/process
+                         └──> 查询待处理队列 / 触发后续处理
 ```
 
 - **Extension**：Chrome 插件（Manifest V3），捕获当前页面信息或选中文本，选择 Action，发送到 Bridge
@@ -34,10 +37,11 @@ claw-inbox/
 │   │       ├── config.ts    # 环境变量配置
 │   │       ├── routes/
 │   │       │   ├── health.ts    # GET /health
-│   │       │   └── capture.ts   # POST /capture（区分 later / 其他）
+│   │       │   ├── capture.ts   # POST /capture（区分 later / 其他）
+│   │       │   └── pending.ts   # GET /pending + POST /pending/:id/process
 │   │       ├── services/
 │   │       │   ├── openclaw.ts  # OpenClaw 转发（mock / 真实 CLI）
-│   │       │   └── inbox.ts     # 待处理队列（文件系统）
+│   │       │   └── inbox.ts     # 待处理队列（文件系统读写 + 状态流转）
 │   │       └── utils/
 │   │           ├── auth.ts          # Bearer Token 验证
 │   │           ├── cors.ts          # CORS 配置
@@ -59,7 +63,8 @@ claw-inbox/
 │           └── lib/
 │               ├── api.ts       # Bridge API 调用 + 错误分类
 │               ├── browser.ts   # 获取页面信息 + 选中文本
-│               ├── history.ts   # 最近 5 条发送历史管理
+│               ├── history.ts   # 发送历史 + 待处理记录管理
+│               ├── pending.ts   # 待处理队列 API 调用
 │               └── settings.ts  # chrome.storage 读写
 ├── packages/
 │   └── shared/              # 共享类型与常量
@@ -105,6 +110,14 @@ claw-inbox/
 3. 点击「重试」按钮，使用原始参数重新发送
 4. 成功后状态自动更新
 
+### 场景 6：从待处理队列继续处理
+1. 点击插件图标，打开 popup
+2. 在待处理队列区看到之前加入的文章列表
+3. 选择一篇文章，点击「总结」/「翻译」/「提取」/「归档」
+4. Bridge 将待处理项状态更新为 processing，转发给 OpenClaw
+5. 处理成功后文件移入 `processed/`，失败则移入 `failed/`
+6. popup 自动刷新显示最新状态
+
 ## 支持的 Action
 
 | Action | UI 文案 | OpenClaw 行为 |
@@ -128,8 +141,8 @@ claw-inbox/
 ```
 /root/.openclaw/workspace/claw-inbox/
 ├── pending/     # 待处理项
-├── processed/   # 已处理项（未来扩展）
-└── failed/      # 失败项（未来扩展）
+├── processed/   # 已处理项（处理成功后自动移入）
+└── failed/      # 失败项（处理失败后自动移入）
 ```
 
 ### 文件格式
@@ -147,6 +160,36 @@ claw-inbox/
 - `routing`（投递渠道配置）
 - `nextActions`（后续可执行的操作列表）
 - `result`, `error`
+
+### 待处理工作流
+
+完整的待处理项生命周期：
+
+1. **入队**：用户通过页面或选中文本点击「加入待处理」，Bridge 将信息写入 `pending/` 目录为 JSON 文件
+2. **查看队列**：用户在 popup 中打开待处理队列区，通过 `GET /pending` 获取所有待处理项列表
+3. **选择操作**：用户从队列中选取一项，点击目标动作按钮（总结 / 翻译 / 提取 / 归档）
+4. **处理中**：`POST /pending/:id/process` 将状态从 `pending` → `processing`，并转发给 OpenClaw
+5. **完成/失败**：
+   - 成功：状态变为 `done`，文件从 `pending/` 移至 `processed/`
+   - 失败：状态变为 `failed`，文件从 `pending/` 移至 `failed/`
+6. **历史记录**：处理完成后自动写入 capture history，popup 可查看
+
+```
+用户操作                     Bridge                              文件系统
+  │                           │                                    │
+  ├─ 加入待处理 ─────────────> │ 写入 JSON ────────────────────────> pending/xxx.json
+  │                           │                                    │
+  ├─ 打开 popup ─────────────> │ GET /pending ─────────────────────> 读取 pending/*.json
+  │                           │ <── 返回列表 ──                     │
+  │                           │                                    │
+  ├─ 点击「总结」────────────> │ POST /pending/:id/process          │
+  │                           │   status: pending → processing     │
+  │                           │   转发给 OpenClaw ──>               │
+  │                           │                                    │
+  │                           │ 处理完成：                          │
+  │                           │   status → done ───────────────────> 移至 processed/
+  │                           │   或 status → failed ──────────────> 移至 failed/
+```
 
 ### 与 archive 的区别
 
@@ -282,7 +325,27 @@ pm2 restart claw-bridge
 
 ## 已实现功能
 
-### v0.3 (当前)
+### v0.4 (当前)
+
+**核心改进**
+- [x] **待处理队列 API**：`GET /pending` 列出所有待处理项，`POST /pending/:id/process` 触发后续处理
+- [x] **Popup 待处理队列区**：展示待处理列表，每项附带操作按钮（总结 / 翻译 / 提取 / 归档）
+- [x] **状态流转**：`pending` → `processing` → `done` / `failed`
+- [x] **文件移动**：处理成功移至 `processed/`，失败移至 `failed/`
+- [x] **待处理处理写入历史**：从待处理队列触发的处理结果自动写入 capture history
+- [x] **新增错误码**：PENDING_NOT_FOUND / INVALID_PENDING_STATE / FORWARD_FAILED 等
+
+**Bridge 新增**
+- [x] `routes/pending.ts`：待处理队列查询与处理路由
+- [x] `services/inbox.ts` 扩展：支持读取、状态更新、文件移动
+- [x] 处理完成后写入 capture history
+
+**Extension 新增**
+- [x] `lib/pending.ts`：待处理队列 API 调用封装
+- [x] Popup 新增待处理队列 UI 区域
+- [x] 操作按钮触发 `POST /pending/:id/process`
+
+### v0.3
 
 **核心改进**
 - [x] **最近 5 条发送历史**：popup 底部展示发送记录（状态 + 动作 + 标题 + 时间 + 目标路径）
@@ -333,7 +396,7 @@ pm2 restart claw-bridge
 - [x] 自动获取当前页面 title / URL
 - [x] Options 页面：Bridge URL + API Token + 测试连接
 
-## Roadmap (v0.4+)
+## Roadmap (v0.5+)
 
 - [ ] 快捷键支持（Ctrl+Shift+S 快速发送）
 - [ ] 自定义默认 Action（右键菜单/快捷键的默认动作）
@@ -342,7 +405,6 @@ pm2 restart claw-bridge
 - [ ] 侧边栏模式
 - [ ] 截图捕获
 - [ ] Firefox 支持
-- [ ] 待处理项后续处理（从 pending 触发 summarize/translate 等）
 
 ## 技术栈
 

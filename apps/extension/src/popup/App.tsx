@@ -6,9 +6,11 @@ import {
   type CapturePayload,
   type CaptureHistoryItem,
   type CaptureResponse,
+  type InboxItem,
+  type PendingProcessAction,
 } from "@claw-inbox/shared";
 import { getCurrentPageInfo, type PageInfo } from "../lib/browser";
-import { sendCapture, getErrorMessage, isRetryableError } from "../lib/api";
+import { sendCapture, getErrorMessage, fetchPendingList, processPendingItem } from "../lib/api";
 import { getSettings } from "../lib/settings";
 import { getHistory, addHistoryItem, updateHistoryItem } from "../lib/history";
 import "./popup.css";
@@ -35,6 +37,11 @@ export default function App() {
   const [history, setHistory] = useState<CaptureHistoryItem[]>([]);
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
+  // Pending queue
+  const [pendingItems, setPendingItems] = useState<InboxItem[]>([]);
+  const [showPending, setShowPending] = useState(false);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+
   useEffect(() => {
     getCurrentPageInfo().then(setPageInfo);
     getSettings().then((s) => {
@@ -44,6 +51,22 @@ export default function App() {
   }, []);
 
   const hasSelection = !!pageInfo.selection;
+
+  const loadPending = async () => {
+    try {
+      const res = await fetchPendingList();
+      setPendingItems(res.items.filter((i) => i.status === "pending"));
+    } catch {
+      setPendingItems([]);
+    }
+  };
+
+  const togglePending = async () => {
+    if (!showPending) {
+      await loadPending();
+    }
+    setShowPending(!showPending);
+  };
 
   const buildPayload = (action: ClawInboxAction, type: CaptureType): CapturePayload => ({
     type,
@@ -86,11 +109,9 @@ export default function App() {
 
   const doRetry = async (item: CaptureHistoryItem) => {
     setRetryingId(item.id);
-    let response: CaptureResponse | null = null;
-    let errorMsg: string | null = null;
 
     try {
-      response = await sendCapture(item.payload);
+      const response = await sendCapture(item.payload);
       const isPending = response.mode === "pending";
       await updateHistoryItem(item.id, {
         status: isPending ? "pending" : "success",
@@ -104,15 +125,54 @@ export default function App() {
         hint: response.deliveryHint,
       });
     } catch (err) {
-      errorMsg = getErrorMessage(err);
-      await updateHistoryItem(item.id, {
-        errorMessage: errorMsg,
-      });
+      const errorMsg = getErrorMessage(err);
+      await updateHistoryItem(item.id, { errorMessage: errorMsg });
       setStatus({ type: "error", message: `重试失败: ${errorMsg}` });
     }
 
     setHistory(await getHistory());
     setRetryingId(null);
+  };
+
+  const doProcessPending = async (item: InboxItem, action: PendingProcessAction) => {
+    setProcessingId(item.id);
+    setStatus(null);
+
+    try {
+      const res = await processPendingItem(item.id, action);
+      setStatus({
+        type: "success",
+        message: res.message,
+        hint: res.deliveryHint,
+      });
+
+      // Add to local history
+      const historyPayload: CapturePayload = {
+        type: item.type,
+        title: item.title,
+        url: item.url,
+        action,
+        selection: item.selection ?? undefined,
+        note: item.note ?? undefined,
+        source: { via: "pending-queue" },
+      };
+      await addHistoryItem(
+        historyPayload,
+        { ok: true, message: res.message, mode: "forwarded", targetLabel: res.targetLabel },
+        null,
+      );
+      setHistory(await getHistory());
+
+      // Refresh pending list
+      await loadPending();
+    } catch (err) {
+      const errorMsg = getErrorMessage(err);
+      setStatus({ type: "error", message: errorMsg });
+      // Refresh to show updated status
+      await loadPending();
+    }
+
+    setProcessingId(null);
   };
 
   if (!configured) {
@@ -152,25 +212,13 @@ export default function App() {
         {hasSelection ? "页面操作" : "快捷操作"}
       </div>
       <div className="action-grid">
-        <button
-          className="action-btn primary"
-          onClick={() => doSend("summarize", "page")}
-          disabled={sending}
-        >
+        <button className="action-btn primary" onClick={() => doSend("summarize", "page")} disabled={sending}>
           总结这页
         </button>
-        <button
-          className="action-btn primary"
-          onClick={() => doSend("extract", "page")}
-          disabled={sending}
-        >
+        <button className="action-btn primary" onClick={() => doSend("extract", "page")} disabled={sending}>
           提取正文
         </button>
-        <button
-          className="action-btn primary"
-          onClick={() => doSend("later", "page")}
-          disabled={sending}
-        >
+        <button className="action-btn primary" onClick={() => doSend("later", "page")} disabled={sending}>
           加入待处理
         </button>
       </div>
@@ -180,18 +228,10 @@ export default function App() {
         <>
           <div className="section-label">选中文本操作</div>
           <div className="action-grid">
-            <button
-              className="action-btn selection-btn"
-              onClick={() => doSend("summarize", "selection")}
-              disabled={sending}
-            >
+            <button className="action-btn selection-btn" onClick={() => doSend("summarize", "selection")} disabled={sending}>
               总结选中文本
             </button>
-            <button
-              className="action-btn selection-btn"
-              onClick={() => doSend("translate", "selection")}
-              disabled={sending}
-            >
+            <button className="action-btn selection-btn" onClick={() => doSend("translate", "selection")} disabled={sending}>
               翻译选中文本
             </button>
           </div>
@@ -199,27 +239,16 @@ export default function App() {
       )}
 
       {/* More actions toggle */}
-      <button
-        className="more-toggle"
-        onClick={() => setShowMore(!showMore)}
-      >
+      <button className="more-toggle" onClick={() => setShowMore(!showMore)}>
         {showMore ? "收起" : "更多操作"}
       </button>
 
       {showMore && (
         <div className="action-grid">
-          <button
-            className="action-btn secondary"
-            onClick={() => doSend("translate", "page")}
-            disabled={sending}
-          >
+          <button className="action-btn secondary" onClick={() => doSend("translate", "page")} disabled={sending}>
             {ACTION_LABELS.translate}
           </button>
-          <button
-            className="action-btn secondary"
-            onClick={() => doSend("archive", "page")}
-            disabled={sending}
-          >
+          <button className="action-btn secondary" onClick={() => doSend("archive", "page")} disabled={sending}>
             {ACTION_LABELS.archive}
           </button>
         </div>
@@ -243,7 +272,66 @@ export default function App() {
         </div>
       )}
 
-      {/* History */}
+      {/* ── Pending Queue ── */}
+      <button className="more-toggle pending-toggle" onClick={togglePending}>
+        {showPending ? "收起待处理" : `待处理队列`}
+      </button>
+
+      {showPending && (
+        <div className="pending-section">
+          {pendingItems.length === 0 ? (
+            <div className="pending-empty">暂无待处理项</div>
+          ) : (
+            <div className="pending-list">
+              {pendingItems.slice(0, 10).map((item) => (
+                <div key={item.id} className="pending-item">
+                  <div className="pending-top">
+                    <span className="pending-type-badge">{item.type === "selection" ? "选中" : "页面"}</span>
+                    <span className="pending-title">{item.title}</span>
+                    <span className="pending-time">{timeAgo(item.createdAt)}</span>
+                  </div>
+                  {item.note && <div className="pending-note">{item.note}</div>}
+                  <div className="pending-actions">
+                    <button
+                      className="pending-action-btn"
+                      onClick={() => doProcessPending(item, "summarize")}
+                      disabled={processingId === item.id}
+                    >
+                      总结
+                    </button>
+                    <button
+                      className="pending-action-btn"
+                      onClick={() => doProcessPending(item, "translate")}
+                      disabled={processingId === item.id}
+                    >
+                      翻译
+                    </button>
+                    <button
+                      className="pending-action-btn"
+                      onClick={() => doProcessPending(item, "extract")}
+                      disabled={processingId === item.id}
+                    >
+                      提取
+                    </button>
+                    <button
+                      className="pending-action-btn"
+                      onClick={() => doProcessPending(item, "archive")}
+                      disabled={processingId === item.id}
+                    >
+                      归档
+                    </button>
+                  </div>
+                  {processingId === item.id && (
+                    <div className="pending-processing">处理中...</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── History ── */}
       {history.length > 0 && (
         <>
           <div className="section-label history-label">最近发送</div>

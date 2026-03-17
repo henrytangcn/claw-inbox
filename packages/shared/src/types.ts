@@ -44,3 +44,52 @@ export interface CaptureHistoryItem {
   payload: CapturePayload;
   errorMessage?: string;
 }
+
+// ── Pending Queue Types ──
+
+export type InboxStatus = "pending" | "processing" | "done" | "failed";
+
+export interface InboxItem {
+  id: string;
+  status: InboxStatus;
+  createdAt: string;
+  updatedAt: string;
+  type: CaptureType;
+  action: string;
+  title: string;
+  url: string;
+  selection: string | null;
+  note: string | null;
+  source?: {
+    browser?: string;
+    capturedAt?: string;
+    via?: string;
+  };
+  routing?: {
+    deliverChannel?: string;
+    deliverTarget?: string;
+  };
+  nextActions: Array<"summarize" | "translate" | "extract" | "archive">;
+  result: unknown;
+  error: string | null;
+}
+
+export interface PendingListResponse {
+  ok: boolean;
+  items: InboxItem[];
+  total: number;
+}
+
+export type PendingProcessAction = "summarize" | "translate" | "extract" | "archive";
+
+export interface PendingProcessRequest {
+  action: PendingProcessAction;
+}
+
+export interface PendingProcessResponse {
+  ok: boolean;
+  message: string;
+  code?: string;
+  targetLabel?: string;
+  deliveryHint?: string;
+}
