@@ -2,6 +2,10 @@
 
 [English](./README.en.md) | 中文
 
+<p align="center">
+  <img src="./apps/extension/public/icons/icon128.png" width="96" alt="Claw Inbox Logo" />
+</p>
+
 浏览器插件 + 云端 Bridge，一键把网页或选中文本发送给云端 OpenClaw 处理。
 
 ## 架构

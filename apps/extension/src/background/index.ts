@@ -86,7 +86,7 @@ async function sendCaptureToBridge(payload: CapturePayload): Promise<CaptureResp
 function notify(message: string, isError = false) {
   chrome.notifications.create({
     type: "basic",
-    iconUrl: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="8" fill="#e74c3c"/><text x="24" y="32" text-anchor="middle" fill="#fff" font-size="24">C</text></svg>'),
+    iconUrl: chrome.runtime.getURL("icons/icon128.png"),
     title: isError ? "Claw Inbox - 发送失败" : "Claw Inbox",
     message,
   });

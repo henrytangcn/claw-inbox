@@ -2,6 +2,10 @@
 
 English | [中文](./README.md)
 
+<p align="center">
+  <img src="./apps/extension/public/icons/icon128.png" width="96" alt="Claw Inbox Logo" />
+</p>
+
 Browser extension + cloud Bridge — one-click capture of web pages or selected text, sent to your cloud-hosted OpenClaw for processing.
 
 ## Architecture
